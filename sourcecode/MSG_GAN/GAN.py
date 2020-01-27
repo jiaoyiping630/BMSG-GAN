@@ -28,6 +28,8 @@ class Generator(th.nn.Module):
 
         assert latent_size != 0 and ((latent_size & (latent_size - 1)) == 0), \
             "latent size not a power of 2"
+        #   这里的&可能是按位与的意思。如果是2的整数次方，二进制一定是10000这样的，减去1恰好为01111
+
         if depth >= 4:
             assert latent_size >= np.power(2, depth - 4), "latent size will diminish to zero"
 
@@ -49,8 +51,12 @@ class Generator(th.nn.Module):
         self.layers = ModuleList([GenInitialBlock(self.latent_size, use_eql=self.use_eql)])
         self.rgb_converters = ModuleList([to_rgb(self.latent_size)])
 
+        #   注：这里的layers存的是卷积块，rgb_converters则用于将中间的表征转换为rgb图
+
         # create the remaining layers
         for i in range(self.depth - 1):
+            #   从这里的实现来看，i=0,1,2时候，latent size维持不变
+            #   后面的层级，latent以2为倍率递减
             if i <= 2:
                 layer = GenGeneralConvBlock(self.latent_size, self.latent_size,
                                             use_eql=self.use_eql)
@@ -77,6 +83,8 @@ class Generator(th.nn.Module):
         for block, converter in zip(self.layers, self.rgb_converters):
             y = block(y)
             outputs.append(converter(y))
+        #   这个循环中，依次求得更高层次的特征，同时根据特征得到rgb输出
+        #   也就是说，前向传播得到的结果是一系列（从低分辨率到高分辨率）的rgb3通道图像
 
         return outputs
 
@@ -139,17 +147,31 @@ class Discriminator(th.nn.Module):
         else:
             def from_rgb(out_channels):
                 return Conv2d(3, out_channels, (1, 1), bias=True)
+        #   from_rgb用于将一个3通道的rgb图（来自于生成器，或真实图片的下采样）经过1x1的卷积转换为特定通道的特征图
 
         self.rgb_to_features = ModuleList()
         self.final_converter = from_rgb(self.feature_size // 2)
+        #   3 -> 256
 
         # create a module list of the other required general convolution blocks
         self.layers = ModuleList()
         self.final_block = DisFinalBlock(self.feature_size, use_eql=self.use_eql)
+        #   512 -> 1 （flatten output raw discriminator scores，尺寸可能是4x4）
+
+        '''
+            判别器里需要做两个操作，第一是把rgb转换为隐层特征，和已经有的特征并起来
+            第二是根据当前的隐层特征，给出一个判别结果
+        '''
 
         # create the remaining layers
         for i in range(self.depth - 1):
             if i > 2:
+                '''
+                    在高分辨率分支，通道是依次增加的
+                    如 i = 5 对应最高分辨率
+                        from_rgb 3 -> 32
+                        conv     64 -> 64
+                '''
                 layer = DisGeneralConvBlock(
                     int(self.feature_size // np.power(2, i - 2)),
                     int(self.feature_size // np.power(2, i - 2)),
@@ -157,12 +179,43 @@ class Discriminator(th.nn.Module):
                 )
                 rgb = from_rgb(int(self.feature_size // np.power(2, i - 1)))
             else:
+                '''
+                    i = 0,1,2 的时候(对应于判别器的末端，最低分辨率部分)，走的是这个分支，
+                    layer = 512 -> 256
+                    rgb = 3 -> 256
+                '''
                 layer = DisGeneralConvBlock(self.feature_size, self.feature_size // 2,
                                             use_eql=self.use_eql)
                 rgb = from_rgb(self.feature_size // 2)
 
             self.layers.append(layer)
             self.rgb_to_features.append(rgb)
+        '''
+            i   layer_cin   layer_cout  rgb_to_features_cin rgb_to_features_cout   shape_in  shape_out(经过layers)
+            
+            F       512           1             3                   256              4
+            
+            0       512         256             3                   256              8
+            1       512         256             3                   256              16
+            2       512         256             3                   256              32
+            
+            3       256         256             3                   128              64
+            4       128         128             3                    64              128        64
+            5        64          64             3                    32
+                                                                    (64)             256        128 
+            大概的逻辑是最高分辨率图像（256）通过最后一个converter和layer，变成了(b,64,128,128)的东西，随后和经过convert的input并联，经过layer
+            (i=5)全分辨率(3,256,256)，经过converter = (64,256,256)，经过layer = (64,128,128)
+            (i=4)/2分辨率(3,128,128)，经过converter = (64,128,128)，并联 = (128,128,128)，经过layer = (128,64,64)
+            (i=3)/4分辨率(3,64,64)，经过converter = (128,64,64)，并联 = (256,64,64)，经过layer = (256,32,32)
+            (i=2)/8分辨率(3,32,32)，经过converter = (256,32,32)，并联 = (512,32,32)，经过layer = (256,16,16)
+            (i=1)/16分辨率(3,16,16)，经过converter = (256,16,16)，并联 = (512,16,16)，经过layer = (256,8,8)
+            (i=0)/32分辨率(3,8,8)，经过converter = (256,8,8)，并联 = (512,8,8)，经过layer = (256,4,4)
+            
+            final/64分辨率(3,4,4)，经过converter = (256,4,4)，并联 = (512,4,4)，经过layer = (b,)
+            
+            inputs_idx  0   1   2   3   4   5   6
+            shape       4   8  16  32  64 128 256 
+        '''
 
         # just replace the last converter
         self.rgb_to_features[self.depth - 2] = \
@@ -189,8 +242,8 @@ class Discriminator(th.nn.Module):
 
         assert len(inputs) == self.depth, \
             "Mismatch between input and Network scales"
-
-        y = self.rgb_to_features[self.depth - 2](inputs[self.depth - 1])
+        #
+        y = self.rgb_to_features[self.depth - 2](inputs[self.depth - 1])    #   输入图像尺寸256，变换为64维特征
         y = self.layers[self.depth - 2](y)
         for x, block, converter in \
                 zip(reversed(inputs[1:-1]),
@@ -353,6 +406,20 @@ class MSG_GAN:
         for sample, img_file in zip(samples, img_files):
             save_image(sample, img_file, nrow=int(sqrt(sample.shape[0])),
                        normalize=True, scale_each=True, padding=0)
+
+
+    def extract(self,image_paths):
+        from torch.nn.functional import avg_pool2d
+        # extract current batch of data for training
+        images = images.to(self.device)
+        extracted_batch_size = images.shape[0]
+
+        # create a list of downsampled images from the real images:
+        images = [images] + [avg_pool2d(images, int(np.power(2, i)))
+                             for i in range(1, self.depth)]
+        images = list(reversed(images))
+
+
 
     def train(self, data, gen_optim, dis_optim, loss_fn, normalize_latents=True,
               start=1, num_epochs=12, feedback_factor=10, checkpoint_factor=1,

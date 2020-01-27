@@ -172,6 +172,12 @@ class PixelwiseNorm(th.nn.Module):
 # Layers required for Building The generator and
 # discriminator
 # ==========================================================
+'''
+    生成器的初始卷积块，把一个latent_size的latent vector转化为一个4x4的体素
+        dconv4 + lrelu
+        conv3 + lrelu
+        pixelnorm
+'''
 class GenInitialBlock(th.nn.Module):
     """ Module implementing the initial block of the Generator
         Takes in whatever latent size and generates output volume
@@ -226,6 +232,11 @@ class GenInitialBlock(th.nn.Module):
         return y
 
 
+'''
+    生成器的通用卷积块
+        2倍上采样
+        两个3x3的卷积 + lrelu + pixelnorm
+'''
 class GenGeneralConvBlock(th.nn.Module):
     """ Module implementing a general convolutional block """
 
@@ -345,7 +356,13 @@ class MinibatchStdDev(th.nn.Module):
         # return the computed values:
         return y
 
-
+'''
+    判别器的最终块
+        concat(x, std(x))       c -> c+1
+        conv3 + lrelu           c+1 -> c
+        conv4 + lrelu           c -> c
+        conv1                   c -> 1
+'''
 class DisFinalBlock(th.nn.Module):
     """ Final block for the Discriminator """
 
@@ -361,7 +378,7 @@ class DisFinalBlock(th.nn.Module):
         super().__init__()
 
         # declare the required modules for forward pass
-        self.batch_discriminator = MinibatchStdDev()
+        self.batch_discriminator = MinibatchStdDev()    #   这里已经实现了concat了，所以是c入，c+1出
 
         if use_eql:
             self.conv_1 = _equalized_conv2d(in_channels + 1, in_channels, (3, 3),
@@ -403,6 +420,12 @@ class DisFinalBlock(th.nn.Module):
         return y.view(-1)
 
 
+'''
+    判别器的中间块
+        conv3 + lrelu           cin -> cin
+        conv3 + lrelu           cin -> cout
+        downsample2d
+'''
 class DisGeneralConvBlock(th.nn.Module):
     """ General block in the discriminator  """
 

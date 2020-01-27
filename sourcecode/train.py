@@ -54,7 +54,7 @@ def parse_arguments():
 
     parser.add_argument("--images_dir", action="store", type=str,
                         # default="../data/celeba",
-                        default=os.environ['SM_CHANNEL_TRAINING'],
+                        # default=os.environ['SM_CHANNEL_TRAINING'],
                         help="path for the images directory")
 
     parser.add_argument("--folder_distributed", action="store", type=bool,
@@ -67,12 +67,12 @@ def parse_arguments():
 
     parser.add_argument("--sample_dir", action="store", type=str,
                         # default="samples/1/",
-                        default=os.environ['SM_MODEL_DIR'],
+                        # default=os.environ['SM_MODEL_DIR'],
                         help="path for the generated samples directory")
 
     parser.add_argument("--model_dir", action="store", type=str,
                         # default="models/1/",
-                        default=os.environ['SM_MODEL_DIR'],
+                        # default=os.environ['SM_MODEL_DIR'],
                         help="path for saved models directory")
 
     parser.add_argument("--loss_function", action="store", type=str,
@@ -158,6 +158,11 @@ def parse_arguments():
 
 
 def main(args):
+
+    gpu_id=0
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+
     """
     Main function for the script
     :param args: parsed command line arguments
