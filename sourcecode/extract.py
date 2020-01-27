@@ -12,6 +12,7 @@ def main():
 
     image_folder = r"D:\Projects\anomaly_detection\datasets\Camelyon\test_negative"
     save_path = r"D:\Projects\anomaly_detection\BMSG_GAN_test_neg.pkl"
+    model_path=r"D:\Projects\anomaly_detection\progresses\MSG-GAN\Models\GAN_DIS_73.pth"
 
     '''-----------------建立数据集和数据载入器----------------'''
 
@@ -56,6 +57,8 @@ def main():
                       use_ema=True,
                       ema_decay=0.999,
                       device=device)
+
+    msg_gan.dis.load_state_dict(th.load(model_path))
 
     '''-----------------进行评估----------------'''
     features = []
