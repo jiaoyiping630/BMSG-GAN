@@ -243,7 +243,7 @@ class Discriminator(th.nn.Module):
         assert len(inputs) == self.depth, \
             "Mismatch between input and Network scales"
         #
-        y = self.rgb_to_features[self.depth - 2](inputs[self.depth - 1])    #   输入图像尺寸256，变换为64维特征
+        y = self.rgb_to_features[self.depth - 2](inputs[self.depth - 1])  # 输入图像尺寸256，变换为64维特征
         y = self.layers[self.depth - 2](y)
         for x, block, converter in \
                 zip(reversed(inputs[1:-1]),
@@ -259,6 +259,33 @@ class Discriminator(th.nn.Module):
         y = self.final_block(y)
 
         # return calculated y
+        return y
+
+    def extract(self, inputs):
+        assert len(inputs) == self.depth, \
+            "Mismatch between input and Network scales"
+        #
+        self.eval()
+
+        with th.no_grad():
+            y = self.rgb_to_features[self.depth - 2](inputs[self.depth - 1])  # 输入图像尺寸256，变换为64维特征
+            y = self.layers[self.depth - 2](y)
+            for x, block, converter in \
+                    zip(reversed(inputs[1:-1]),
+                        reversed(self.layers[:-1]),
+                        reversed(self.rgb_to_features[:-1])):
+                input_part = converter(x)  # convert the input:
+                y = th.cat((input_part, y), dim=1)  # concatenate the inputs:
+                y = block(y)  # apply the block
+
+            # calculate the final block:
+            input_part = self.final_converter(inputs[0])
+            y = th.cat((input_part, y), dim=1)
+            y = self.final_block.batch_discriminator(y)
+            y = self.final_block.lrelu(self.final_block.conv_1(y))
+            y = self.final_block.lrelu(self.final_block.conv_2(y))
+            y = y.view(-1)
+
         return y
 
 
@@ -408,19 +435,6 @@ class MSG_GAN:
                        normalize=True, scale_each=True, padding=0)
 
 
-    def extract(self,image_paths):
-        from torch.nn.functional import avg_pool2d
-        # extract current batch of data for training
-        images = images.to(self.device)
-        extracted_batch_size = images.shape[0]
-
-        # create a list of downsampled images from the real images:
-        images = [images] + [avg_pool2d(images, int(np.power(2, i)))
-                             for i in range(1, self.depth)]
-        images = list(reversed(images))
-
-
-
     def train(self, data, gen_optim, dis_optim, loss_fn, normalize_latents=True,
               start=1, num_epochs=12, feedback_factor=10, checkpoint_factor=1,
               data_percentage=100, num_samples=36,
@@ -511,7 +525,7 @@ class MSG_GAN:
                                                    images, loss_fn)
 
                 # provide a loss feedback
-                if i % (int(limit / feedback_factor) + 1) == 0 or i == 1:     # Avoid div by 0 error on small training sets
+                if i % (int(limit / feedback_factor) + 1) == 0 or i == 1:  # Avoid div by 0 error on small training sets
                     elapsed = time.time() - global_time
                     elapsed = str(datetime.timedelta(seconds=elapsed))
                     print("Elapsed [%s] batch: %d  d_loss: %f  g_loss: %f"
